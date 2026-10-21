@@ -169,10 +169,62 @@ namespace spare_tool_system
         {
             bind_table();
         }
+        // Export: query only the 24 columns the Excel needs, with parameters and a longer timeout.
+        // (Does NOT re-bind the GridView, and does NOT go through datacon's default 30s timeout.)
+        private DataTable Get_export_data()
+        {
+            string sql = " SELECT tool_id2, group_name, model_name, tool_no, qty_toolModel, part_id2, part_no, part_name, "
+                       + " usage, period_change, leadtime, moq, pcs_unitMoq, unit_name, order_unit, used, unused, loc_qty, "
+                       + " brand_name, price, location, registerDate, regis_fname, remark "
+                       + " FROM view_spare_part_list WHERE part_id IS NOT NULL ";
+
+            using (SqlConnection cn = new SqlConnection(ConfigurationManager.ConnectionStrings["Sql"].ConnectionString))
+            using (SqlCommand cmd = new SqlCommand())
+            {
+                cmd.Connection = cn;
+                cmd.CommandTimeout = 300; // 5 min (default is 30s -> Timeout)
+
+                if (ddl_group.SelectedValue != "")
+                {
+                    sql += " AND group_id = @group_id ";
+                    cmd.Parameters.Add("@group_id", SqlDbType.Int).Value = Convert.ToInt32(ddl_group.SelectedValue);
+                }
+                if (txt_tool_no.Text.Trim() != "")
+                {
+                    sql += " AND tool_no LIKE @tool_no ";
+                    cmd.Parameters.Add("@tool_no", SqlDbType.NVarChar, 200).Value = "%" + txt_tool_no.Text.Trim() + "%";
+                }
+                if (txt_part_no.Text.Trim() != "")
+                {
+                    sql += " AND part_no LIKE @part_no ";
+                    cmd.Parameters.Add("@part_no", SqlDbType.NVarChar, 200).Value = "%" + txt_part_no.Text.Trim() + "%";
+                }
+                if (txt_part_name.Text.Trim() != "")
+                {
+                    sql += " AND part_name LIKE @part_name ";
+                    cmd.Parameters.Add("@part_name", SqlDbType.NVarChar, 400).Value = "%" + txt_part_name.Text.Trim() + "%";
+                }
+                if (txt_partID_search.Text.Trim() != "")
+                {
+                    sql += " AND part_id2 LIKE @part_id2 ";
+                    cmd.Parameters.Add("@part_id2", SqlDbType.NVarChar, 50).Value = "%" + txt_partID_search.Text.Trim() + "%";
+                }
+
+                sql += Get_where_Dept(); // built from Session only, no user input
+                cmd.CommandText = sql;
+
+                DataTable dt = new DataTable();
+                using (SqlDataAdapter da = new SqlDataAdapter(cmd))
+                {
+                    da.Fill(dt);
+                }
+                return dt;
+            }
+        }
+
         protected void btn_excel_Click(object sender, ImageClickEventArgs e)
         {
-            bind_table();
-            DataTable dt_db = dc.dt;
+            DataTable dt_db = Get_export_data();
 
             // if (dt_db.Rows.Count < 4000)
             // {
@@ -209,37 +261,20 @@ namespace spare_tool_system
             range.Style.Fill.SetBackgroundColor(XLColor.CanaryYellow);
             range.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
             range.Style.Border.InsideBorder = XLBorderStyleValues.Thin;
-            for (int i = 2; i < dt_db.Rows.Count + 2; i++)
+            // dt_db columns are already in Excel column order (see Get_export_data), so loop by index
+            int colCount = dt_db.Columns.Count; // 24
+            int r = 2;
+            foreach (DataRow dr in dt_db.Rows)
             {
-
-                ws.Cell(i, 1).Value = (i - 1).ToString();
-                ws.Cell(i, 2).Value = dt_db.Rows[i - 2]["tool_id2"].ToString();
-                ws.Cell(i, 3).Value = dt_db.Rows[i - 2]["group_name"].ToString();
-                ws.Cell(i, 4).Value = dt_db.Rows[i - 2]["model_name"].ToString();
-                ws.Cell(i, 5).Value = dt_db.Rows[i - 2]["tool_no"].ToString();
-                ws.Cell(i, 6).Value = dt_db.Rows[i - 2]["qty_toolModel"].ToString();
-                ws.Cell(i, 7).Value = dt_db.Rows[i - 2]["part_id2"].ToString();
-                ws.Cell(i, 8).Value = dt_db.Rows[i - 2]["part_no"].ToString();
-                ws.Cell(i, 9).Value = dt_db.Rows[i - 2]["part_name"].ToString();
-                ws.Cell(i, 10).Value = dt_db.Rows[i - 2]["usage"].ToString();
-                ws.Cell(i, 11).Value = dt_db.Rows[i - 2]["period_change"].ToString();
-                ws.Cell(i, 12).Value = dt_db.Rows[i - 2]["leadtime"].ToString();
-                ws.Cell(i, 13).Value = dt_db.Rows[i - 2]["moq"].ToString();
-                ws.Cell(i, 14).Value = dt_db.Rows[i - 2]["pcs_unitMoq"].ToString();
-                ws.Cell(i, 15).Value = dt_db.Rows[i - 2]["unit_name"].ToString();
-                ws.Cell(i, 16).Value = dt_db.Rows[i - 2]["order_unit"].ToString();
-                ws.Cell(i, 17).Value = dt_db.Rows[i - 2]["used"].ToString();
-                ws.Cell(i, 18).Value = dt_db.Rows[i - 2]["unused"].ToString();
-                ws.Cell(i, 19).Value = dt_db.Rows[i - 2]["loc_qty"].ToString();
-                ws.Cell(i, 20).Value = dt_db.Rows[i - 2]["brand_name"].ToString();
-                ws.Cell(i, 21).Value = dt_db.Rows[i - 2]["price"].ToString();
-                ws.Cell(i, 22).Value = dt_db.Rows[i - 2]["location"].ToString();
-                ws.Cell(i, 23).Value = dt_db.Rows[i - 2]["registerDate"].ToString();
-                ws.Cell(i, 24).Value = dt_db.Rows[i - 2]["regis_fname"].ToString();
-                ws.Cell(i, 25).Value = dt_db.Rows[i - 2]["remark"].ToString();
-
+                ws.Cell(r, 1).Value = (r - 1).ToString();
+                for (int c = 0; c < colCount; c++)
+                {
+                    ws.Cell(r, c + 2).Value = dr[c].ToString();
+                }
+                r++;
             }
-            ws.Columns().AdjustToContents();
+            // AdjustToContents over every row is very slow on big sheets -> measure only the first 200 rows
+            ws.Columns(1, 25).AdjustToContents(1, Math.Min(dt_db.Rows.Count + 1, 200));
             Response.Clear();
             Response.Buffer = true;
             Response.Charset = "";
